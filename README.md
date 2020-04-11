@@ -7,7 +7,7 @@ A tiniest of tools to generate grass textures, for new Grass FX.
 
 Original Codemasters presentation about grass ([link](http://blog.codemasters.com/wp-content/uploads/2014/10/Rendering-Fields-of-Grass-using-DirectX11-in-GRID-Autosport.pdf)) 
 had an example of their grass texture. I couldn’t find a good way to hand paint a texture like that, so I made a small generator for a 
-similar looking grass. Everything is very primitive, but I believe it produces compatible result.
+similar looking grass. Everything is very primitive, but I believe it produces compatible results.
 
 ![img](https://i.imgur.com/bxbXAVs.png)
 
