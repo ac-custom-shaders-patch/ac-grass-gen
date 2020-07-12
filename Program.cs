@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 
 namespace ac_grass_gen {
@@ -18,6 +20,20 @@ namespace ac_grass_gen {
         public static double Saturate(this double value) => value < 0d ? 0d : value > 1d ? 1d : value;
     }
 
+    class FinOptions {
+        public double FinCount1 = 15, FinCount2 = 15;
+        public double X1 = 0.3, X2 = 0.7;
+        public double Y1 = 0.96, Y2 = 0.99;
+        public double Vx1 = -0.6, Vx2 = 0.6;
+        public double Vy1 = -0.8, Vy2 = -1.8;
+        public double Gravity1 = 1.0, Gravity2 = 2.2;
+        public double Width1 = 0.03, Width2 = 0.05;
+        public double CurveBack1 = 0.0, CurveBack2 = 1.7;
+        public double Resolution1 = 512, Resolution2 = 512;
+        public double Count1 = 16, Count2 = 16;
+        public double SuperSampling = 2;
+    }
+
     internal class Program {
         public class Fin {
             public double X, Y, Width, Life;
@@ -25,14 +41,15 @@ namespace ac_grass_gen {
             public double CurveBack;
             public double Intensity, HeightAO;
 
-            public Fin(double yOffset) {
-                X = MathUtils.Random().Lerp(0.3, 0.7);
-                Y = yOffset.Lerp(0.96, 0.99);
-                Vx = MathUtils.Random().Lerp(-0.6, 0.6) * (1 - (X - 0.5).Abs());
-                Vy = MathUtils.Random().Lerp(-0.8, -1.8) * 1.2;
-                Gravity = MathUtils.Random().Lerp(1.0, 2.2);
-                Width = MathUtils.Random().Lerp(0.03, 0.05);
-                CurveBack = MathUtils.Random() > 0.6 ? (MathUtils.Random() > 0.5 ? 1 : -1) * Math.Pow(MathUtils.Random(), 2).Lerp(0.0, 1.7) : 0;
+            public Fin(double yOffset, FinOptions options) {
+                X = MathUtils.Random().Lerp(options.X1, options.X2);
+                Y = yOffset.Lerp(options.Y1, options.Y2);
+                Vx = MathUtils.Random().Lerp(options.Vx1, options.Vx2) * (1 - (X - 0.5).Abs());
+                Vy = MathUtils.Random().Lerp(options.Vy1, options.Vy2) * 1.2;
+                Gravity = MathUtils.Random().Lerp(options.Gravity1, options.Gravity2);
+                Width = MathUtils.Random().Lerp(options.Width1, options.Width2);
+                CurveBack = MathUtils.Random() > 0.6 ?
+                        (MathUtils.Random() > 0.5 ? 1 : -1) * Math.Pow(MathUtils.Random(), 2).Lerp(options.CurveBack1, options.CurveBack2) : 0;
                 StartWidth = Width;
                 if (MathUtils.Random() > 0.3 * yOffset) {
                     Life = MathUtils.Random().Lerp(0.8, 1.0);
@@ -95,7 +112,9 @@ namespace ac_grass_gen {
                     rx = px;
                     ry = py;
 
-                    var b = ((Intensity * 2.0 - 1.0).Saturate() * 0.67 + (Intensity * 2.0).Saturate() * (1 - Y * HeightAO + dx.Abs() / dy.Abs()).Saturate()).Saturate();
+                    var b =
+                            ((Intensity * 2.0 - 1.0).Saturate() * 0.67 + (Intensity * 2.0).Saturate() * (1 - Y * HeightAO + dx.Abs() / dy.Abs()).Saturate())
+                                    .Saturate();
                     var s = Math.Pow(1 - Life / LifeTotal, 2.1);
                     var c = (byte)(255 * (b * s.Lerp(0.65, 1)).Saturate().Lerp(0.67, 1.0));
                     var e = new SolidBrush(Color.FromArgb(0, c, 0));
@@ -113,27 +132,35 @@ namespace ac_grass_gen {
             return b;
         }
 
-        private static Image GenPiece(int size) {
+        private static Image GenPiece(int size, FinOptions options) {
             var img = new Bitmap(size, size, PixelFormat.Format32bppArgb);
             using (var grp = Graphics.FromImage(img)) {
-                for (int i = 0, t = 15; i < t; i++) {
-                    new Fin((double)i / (t - 1)).Run(grp, size);
+                for (int i = 0, t = (int)MathUtils.Random().Lerp(options.FinCount1, options.FinCount2); i < t; i++) {
+                    new Fin((double)i / (t - 1), options).Run(grp, size);
                 }
             }
             return img;
         }
 
-        private static void GenPiece(int size, string dest) {
-            ResizeImage(GenPiece(size * 2), size, size).Save(dest);
+        private static void GenPiece(int size, string dest, FinOptions options) {
+            if (options.SuperSampling > 1) {
+                ResizeImage(GenPiece((int)(size * options.SuperSampling), options), size, size).Save(dest);
+            } else {
+                GenPiece(size, options).Save(dest);
+            }
         }
 
-        private static Image GenMap(int size, int count) {
+        private static Image GenMap(int size, int count, FinOptions options) {
             var b = new Bitmap(size * count, size, PixelFormat.Format32bppArgb);
             var g = Graphics.FromImage(b);
             g.Clear(Color.Black);
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             for (var i = 0; i < count; i++) {
-                g.DrawImage(GenPiece(size * 2), size * i, 0, size, size);
+                if (options.SuperSampling > 1) {
+                    g.DrawImage(ResizeImage(GenPiece((int)(size * options.SuperSampling), options), size, size), size * i, 0, size, size);
+                } else {
+                    g.DrawImage(GenPiece(size, options), size * i, 0, size, size);
+                }
             }
             g.Dispose();
 
@@ -155,17 +182,76 @@ namespace ac_grass_gen {
             return b;
         }
 
-        private static void GenMap(int size, int count, string dest) {
-            GenMap(size, count).Save(dest);
+        private static void GenMap(int size, int count, string dest, FinOptions options) {
+            GenMap(size, count, options).Save(dest);
         }
 
         public static void Main(string[] args) {
+            var options = new FinOptions();
+            foreach (var line in File.ReadAllLines("config.txt").Select(x => x.Split('=')).Where(x => x.Length == 2).Select(x => new {
+                Key = x[0].Trim(),
+                Value = x[1].Split(',').Select(FlexibleParser.TryParseDouble).Where(y => y.HasValue).Select(y => y.Value).ToList()
+            })) {
+                void Fill(ref double v1, ref double v2, List<double> values) {
+                    if (values.Count == 0) return;
+                    v1 = values[0];
+                    v2 = values.Count == 2 ? values[1] : v1;
+                }
+
+                switch (line.Key) {
+                    case "FinCount":
+                        Fill(ref options.FinCount1, ref options.FinCount2, line.Value);
+                        break;
+                    case "X":
+                        Fill(ref options.X1, ref options.X2, line.Value);
+                        break;
+                    case "Y":
+                        Fill(ref options.Y1, ref options.Y2, line.Value);
+                        break;
+                    case "Vx":
+                        Fill(ref options.Vx1, ref options.Vx2, line.Value);
+                        break;
+                    case "Vy":
+                        Fill(ref options.Vy1, ref options.Vy2, line.Value);
+                        break;
+                    case "Gravity":
+                        Fill(ref options.Gravity1, ref options.Gravity2, line.Value);
+                        break;
+                    case "Width":
+                        Fill(ref options.Width1, ref options.Width2, line.Value);
+                        break;
+                    case "CurveBack":
+                        Fill(ref options.CurveBack1, ref options.CurveBack2, line.Value);
+                        break;
+                    case "ResolutionSingle":
+                        if (line.Value.Count > 0) options.Resolution1 = line.Value[0];
+                        break;
+                    case "ResolutionSet":
+                        if (line.Value.Count > 0) options.Resolution2 = line.Value[0];
+                        break;
+                    case "CountSingle":
+                        if (line.Value.Count > 0) options.Count1 = line.Value[0];
+                        break;
+                    case "CountSet":
+                        if (line.Value.Count > 0) options.Count2 = line.Value[0];
+                        break;
+                    case "SuperSampling":
+                        if (line.Value.Count > 0) options.SuperSampling = line.Value[0];
+                        break;
+                    default:
+                        Console.Error.WriteLine($"Unknown key: {line.Key}");
+                        break;
+                }
+            }
+
             var destination = Path.Combine(Path.GetDirectoryName(Assembly.GetEntryAssembly()?.Location) ?? "", "generated");
             Directory.CreateDirectory(destination);
-            for (var i = 0; i < 16; i++) {
-                GenPiece(512, Path.Combine(destination, $"{i}.png"));
+            for (var i = 0; i < (int)options.Count1; i++) {
+                GenPiece((int)options.Resolution1, Path.Combine(destination, $"{i}.png"), options);
             }
-            GenMap(256, 16, Path.Combine(destination, "atlas.png"));
+            if ((int)options.Count2 > 0) {
+                GenMap((int)options.Resolution2, (int)options.Count2, Path.Combine(destination, "atlas.png"), options);
+            }
         }
     }
 }
