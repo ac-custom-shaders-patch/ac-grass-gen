@@ -54,8 +54,8 @@ namespace ac_grass_gen {
                 if (MathUtils.Random() > 0.3 * yOffset) {
                     Life = MathUtils.Random().Lerp(0.8, 1.0);
                 } else {
-                    Life = MathUtils.Random().Lerp(0.2, 0.4);
-                    Vy *= 0.5;
+                    Life = MathUtils.Random().Lerp(0.2, 0.4) * 2;
+                    Vy *= 0.8;
                 }
                 Life *= (Gravity / 2.2 + 1) / 2;
                 LifeTotal = Life;
@@ -84,6 +84,11 @@ namespace ac_grass_gen {
                 var p = new Point[4];
                 var rx = -1.0;
                 var ry = 0.0;
+                var lines = new Tuple<double, Pen>[10];
+                for (var i = 0; i < lines.Length; ++i) {
+                    lines[i] = Tuple.Create(MathUtils.Random(), new Pen(Color.FromArgb((int)(15 + 5 * MathUtils.Random()), 0, 0, 0)));
+                    lines[i].Item2.Width = 4;
+                }
                 while (Life > 0) {
                     var x0 = X;
                     var y0 = Y;
@@ -119,6 +124,16 @@ namespace ac_grass_gen {
                     var c = (byte)(255 * (b * s.Lerp(0.65, 1)).Saturate().Lerp(0.67, 1.0));
                     var e = new SolidBrush(Color.FromArgb(0, c, 0));
                     g.FillPolygon(e, p);
+
+                    var l = (int)(lines.Length * Math.Sqrt(Math.Min(Life / LifeTotal, 1)) * Math.Min((1 - Life / LifeTotal) * 3, 1));
+                    for (var index = 0; index < l; index++) {
+                        var t = lines[index];
+                        g.DrawLine(t.Item2,
+                                (int)t.Item1.Lerp(p[0].X, p[1].X),
+                                (int)t.Item1.Lerp(p[0].Y, p[1].Y),
+                                (int)t.Item1.Lerp(p[3].X, p[2].X),
+                                (int)t.Item1.Lerp(p[3].Y, p[2].Y));
+                    }
                 }
             }
         }
@@ -186,7 +201,86 @@ namespace ac_grass_gen {
             GenMap(size, count, options).Save(dest);
         }
 
+        private struct IntensityPoint {
+            public double X;
+            public double Y;
+            public byte Intensity;
+        }
+
+        private static Image GenDrops(IEnumerable<Tuple<double, double>> drops) {
+            var list = drops.ToList();
+            var img = new Bitmap(2048, 2048, PixelFormat.Format32bppArgb);
+            var padding = 4;
+            var total = 0;
+            var intensityPoints = new List<IntensityPoint>();
+
+            foreach (var point in list) {
+                // var dropSize = (int)MathUtils.Random().Lerp(20, 28);
+                var dropSize = (int)Math.Pow(MathUtils.Random(), 1.8).Lerp(6, 20);
+                var dropSizeHalf = dropSize / 2d;
+                var dropSizeHalfSquared = dropSizeHalf * dropSizeHalf;
+
+                var fromX = padding + (int)((2048 - padding * 2) * ((point.Item1 + (MathUtils.Random() - 0.5) * 0.03) * 0.5 + 0.5));
+                var fromY = padding + (int)((2048 - padding * 2) * ((point.Item2 + (MathUtils.Random() - 0.5) * 0.03) * 0.5 + 0.5));
+                var centerX = fromX + dropSizeHalf;
+                var centerY = fromY + dropSizeHalf;
+                var random = (byte)(255 * MathUtils.Random());
+                intensityPoints.Add(new IntensityPoint { X = centerX, Y = centerY, Intensity = random });
+                Console.WriteLine($"{Math.Round(1000d * total / list.Count) / 10d}% ({fromX}, {fromY})");
+                for (var y = 0; y < dropSize; ++y) {
+                    for (var x = 0; x < dropSize; ++x) {
+                        var pointX = fromX + x;
+                        var pointY = fromY + y;
+                        var deltaX = pointX - centerX;
+                        var deltaY = pointY - centerY;
+                        var distance = deltaX * deltaX + deltaY * deltaY;
+                        if (distance > dropSizeHalfSquared) continue;
+
+                        var normalX = deltaX / dropSizeHalf;
+                        var normalY = deltaY / dropSizeHalf;
+                        img.SetPixel((pointX + 2048) % 2048, (pointY + 2048) % 2048,
+                                Color.FromArgb(255, (byte)(normalX * 127 + 127), (byte)(normalY * 127 + 127), random));
+                    }
+                }
+                ++total;
+            }
+
+            for (var y = 0; y < 2048; ++y) {
+                for (var x = 0; x < 2048; ++x) {
+                    var pixel = img.GetPixel(x, y);
+                    if (pixel.A == 0 && pixel.B == 0) {
+                        var minDistance = double.MaxValue;
+                        var intensity = 0;
+                        for (var i = intensityPoints.Count - 1; i >= 0; i--) {
+                            var point = intensityPoints[i];
+                            var distanceX = x - point.X;
+                            var distanceY = y - point.Y;
+                            var distance = Math.Sqrt(distanceX * distanceX + distanceY * distanceY);
+                            if (distance < minDistance) {
+                                minDistance = distance;
+                                intensity = point.Intensity;
+                            }
+                        }
+
+                        img.SetPixel(x, y, Color.FromArgb(0, 0, 0, intensity));
+                    }
+                }
+            }
+            Console.WriteLine($"Expansion is finished");
+
+            return img;
+        }
+
         public static void Main(string[] args) {
+            if (File.Exists("list.txt")) {
+                // const double threshold = 0.43;
+                const double threshold = 0.6;
+                GenDrops(File.ReadLines("list.txt").Select(x => x.Split(',')).Where(x => x.Length == 2)
+                        .Select(x => Tuple.Create(FlexibleParser.TryParseDouble(x[0]) / threshold ?? 0d, FlexibleParser.TryParseDouble(x[1]) / threshold ?? 0d))
+                        .Where(x => Math.Abs(x.Item1) < 1d && Math.Abs(x.Item2) < 1d)).Save("drops_rare.png");
+                return;
+            }
+
             var options = new FinOptions();
             foreach (var line in File.ReadAllLines("config.txt").Select(x => x.Split('=')).Where(x => x.Length == 2).Select(x => new {
                 Key = x[0].Trim(),
